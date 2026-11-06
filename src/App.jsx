@@ -10,16 +10,21 @@ const SPEED = 60 // px per second
 const FLASH_DURATION_MS = 260
 const DROP_GRAVITY = 480 // px/s^2
 
-// toughness tiers: size range, required hold time, score value
+const AVATAR_SIZE = 38
+const AVATAR_SPEED = 320 // px per second — the travel time is the challenge
+const PING_DURATION_MS = 400
+
+// toughness tiers: size range, required contact time to pop, score value
 const TIERS = [
-  { tier: 1, minSize: 46, maxSize: 58, holdMs: 90, points: 1 },
-  { tier: 2, minSize: 58, maxSize: 72, holdMs: 380, points: 2 },
-  { tier: 3, minSize: 72, maxSize: 88, holdMs: 680, points: 3 },
+  { tier: 1, minSize: 46, maxSize: 58, holdMs: 120, points: 1 },
+  { tier: 2, minSize: 58, maxSize: 72, holdMs: 400, points: 2 },
+  { tier: 3, minSize: 72, maxSize: 88, holdMs: 700, points: 3 },
 ]
 const TIER_WEIGHTS = [0.55, 0.3, 0.15]
 
 let nextId = 1
 let nextParticleId = 1
+let nextPingId = 1
 
 function randomBetween(min, max) {
   return min + Math.random() * (max - min)
@@ -99,15 +104,18 @@ export default function App() {
   const [status, setStatus] = useState('idle') // idle | playing | over
   const [items, setItems] = useState([])
   const [particles, setParticles] = useState([])
+  const [pings, setPings] = useState([])
+  const [avatar, setAvatar] = useState({ x: 0, y: 0, rotation: 0 })
   const [score, setScore] = useState(0)
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS)
   const [missed, setMissed] = useState(0)
-  const [pressedId, setPressedId] = useState(null)
 
   const arenaRef = useRef(null)
   const itemsRef = useRef([])
   const particlesRef = useRef([])
-  const pressingRef = useRef(null) // { id, start }
+  const pingsRef = useRef([])
+  const avatarRef = useRef({ x: 0, y: 0, rotation: 0, targetX: null, targetY: null })
+  const touchingRef = useRef(null) // { id, start }
   const rafRef = useRef(null)
   const lastSpawnRef = useRef(0)
   const lastFrameRef = useRef(0)
@@ -115,6 +123,7 @@ export default function App() {
 
   itemsRef.current = items
   particlesRef.current = particles
+  pingsRef.current = pings
 
   const stopLoop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -135,7 +144,7 @@ export default function App() {
       itemsRef.current = [...itemsRef.current, makeItem(bounds.width, bounds.height)]
     }
 
-    // move + spin
+    // move + spin balloons
     itemsRef.current = itemsRef.current.map((item) => {
       let { x, y, vx, vy } = item
       x += vx * dt
@@ -147,19 +156,50 @@ export default function App() {
       return { ...item, x, y, vx, vy, rotation: item.rotation + item.spin * dt }
     })
 
-    // resolve hold-to-pop
-    const pressing = pressingRef.current
-    if (pressing) {
-      const pressedItem = itemsRef.current.find((i) => i.id === pressing.id)
-      if (!pressedItem) {
-        pressingRef.current = null
-      } else if (now - pressing.start >= pressedItem.holdMs) {
-        itemsRef.current = itemsRef.current.filter((i) => i.id !== pressedItem.id)
-        particlesRef.current = [...particlesRef.current, ...burstParticles(pressedItem, now)]
-        setScore((s) => s + pressedItem.points)
-        pressingRef.current = null
-        setPressedId(null)
+    // move avatar toward its target at a finite speed
+    const av = avatarRef.current
+    if (av.targetX != null) {
+      const dx = av.targetX - av.x
+      const dy = av.targetY - av.y
+      const dist = Math.hypot(dx, dy)
+      const step = AVATAR_SPEED * dt
+      if (dist <= step || dist === 0) {
+        av.x = av.targetX
+        av.y = av.targetY
+        av.targetX = null
+        av.targetY = null
+      } else {
+        av.x += (dx / dist) * step
+        av.y += (dy / dist) * step
+        av.rotation = (Math.atan2(dx, -dy) * 180) / Math.PI
       }
+    }
+
+    // find closest balloon the avatar is touching
+    const avCx = av.x
+    const avCy = av.y
+    let closest = null
+    let closestDist = Infinity
+    for (const item of itemsRef.current) {
+      const icx = item.x + item.size / 2
+      const icy = item.y + item.size / 2
+      const dist = Math.hypot(avCx - icx, avCy - icy)
+      const touchRadius = AVATAR_SIZE * 0.32 + item.size * 0.38
+      if (dist <= touchRadius && dist < closestDist) {
+        closest = item
+        closestDist = dist
+      }
+    }
+
+    if (!closest) {
+      touchingRef.current = null
+    } else if (touchingRef.current?.id !== closest.id) {
+      touchingRef.current = { id: closest.id, start: now }
+    } else if (now - touchingRef.current.start >= closest.holdMs) {
+      itemsRef.current = itemsRef.current.filter((i) => i.id !== closest.id)
+      particlesRef.current = [...particlesRef.current, ...burstParticles(closest, now)]
+      setScore((s) => s + closest.points)
+      touchingRef.current = null
     }
 
     // expire items past lifespan
@@ -168,10 +208,7 @@ export default function App() {
       const alive = now - item.bornAt < item.lifespan
       if (!alive) {
         missedThisFrame += 1
-        if (pressingRef.current?.id === item.id) {
-          pressingRef.current = null
-          setPressedId(null)
-        }
+        if (touchingRef.current?.id === item.id) touchingRef.current = null
       }
       return alive
     })
@@ -185,8 +222,13 @@ export default function App() {
       })
       .filter((p) => now - p.bornAt < p.life)
 
+    // age out tap pings
+    pingsRef.current = pingsRef.current.filter((p) => now - p.bornAt < PING_DURATION_MS)
+
     setItems(itemsRef.current)
     setParticles(particlesRef.current)
+    setPings(pingsRef.current)
+    setAvatar({ x: av.x, y: av.y, rotation: av.rotation })
 
     const remainingMs = endAtRef.current - now
     if (remainingMs <= 0) {
@@ -201,12 +243,20 @@ export default function App() {
   }, [stopLoop])
 
   const startGame = useCallback(() => {
+    const bounds = arenaRef.current?.getBoundingClientRect()
+    const startX = bounds ? bounds.width / 2 : 0
+    const startY = bounds ? bounds.height / 2 : 0
+
     itemsRef.current = []
     particlesRef.current = []
-    pressingRef.current = null
+    pingsRef.current = []
+    touchingRef.current = null
+    avatarRef.current = { x: startX, y: startY, rotation: 0, targetX: null, targetY: null }
+
     setItems([])
     setParticles([])
-    setPressedId(null)
+    setPings([])
+    setAvatar({ x: startX, y: startY, rotation: 0 })
     setScore(0)
     setMissed(0)
     setTimeLeft(ROUND_SECONDS)
@@ -223,19 +273,16 @@ export default function App() {
     return stopLoop
   }, [status, tick, stopLoop])
 
-  const beginPress = useCallback((e, item) => {
-    e.preventDefault()
-    e.currentTarget.setPointerCapture?.(e.pointerId)
-    pressingRef.current = { id: item.id, start: performance.now() }
-    setPressedId(item.id)
-  }, [])
-
-  const endPress = useCallback((e, item) => {
-    if (pressingRef.current?.id === item.id) {
-      pressingRef.current = null
-      setPressedId(null)
-    }
-  }, [])
+  const handleArenaPointerDown = useCallback((e) => {
+    if (status !== 'playing') return
+    const bounds = arenaRef.current.getBoundingClientRect()
+    const x = e.clientX - bounds.left
+    const y = e.clientY - bounds.top
+    avatarRef.current.targetX = x
+    avatarRef.current.targetY = y
+    pingsRef.current = [...pingsRef.current, { id: nextPingId++, x, y, bornAt: performance.now() }]
+    setPings(pingsRef.current)
+  }, [status])
 
   return (
     <div className="app">
@@ -257,7 +304,23 @@ export default function App() {
         <div className="time-bar-fill" style={{ width: `${(timeLeft / ROUND_SECONDS) * 100}%` }} />
       </div>
 
-      <div className="arena" ref={arenaRef}>
+      <div className="arena" ref={arenaRef} onPointerDown={handleArenaPointerDown}>
+        {pings.map((p) => {
+          const progress = Math.min(1, (performance.now() - p.bornAt) / PING_DURATION_MS)
+          return (
+            <div
+              key={p.id}
+              className="ping"
+              style={{
+                left: p.x,
+                top: p.y,
+                transform: `translate(-50%, -50%) scale(${0.3 + progress * 1.4})`,
+                opacity: 1 - progress,
+              }}
+            />
+          )
+        })}
+
         {particles.map((p) => {
           if (p.type === 'flash') {
             const progress = Math.min(1, (performance.now() - p.bornAt) / p.life)
@@ -300,14 +363,15 @@ export default function App() {
         {items.map((item) => {
           const ageMs = performance.now() - item.bornAt
           const lifeLeft = Math.max(0, 1 - ageMs / item.lifespan)
-          const isPressed = pressedId === item.id
-          const holdStart = pressingRef.current?.id === item.id ? pressingRef.current.start : null
-          const holdProgress = holdStart ? Math.min(1, (performance.now() - holdStart) / item.holdMs) : 0
-          const squish = isPressed ? 1 - holdProgress * 0.18 : 1
+          const isTouched = touchingRef.current?.id === item.id
+          const holdProgress = isTouched
+            ? Math.min(1, (performance.now() - touchingRef.current.start) / item.holdMs)
+            : 0
+          const squish = isTouched ? 1 - holdProgress * 0.18 : 1
           return (
-            <button
+            <div
               key={item.id}
-              className={`balloon${isPressed ? ' pressed' : ''}`}
+              className={`balloon${isTouched ? ' pressed' : ''}`}
               style={{
                 width: item.size,
                 height: item.size,
@@ -315,22 +379,24 @@ export default function App() {
                 opacity: Math.min(1, lifeLeft + 0.2),
                 '--hue': item.hue,
               }}
-              onPointerDown={(e) => beginPress(e, item)}
-              onPointerUp={(e) => endPress(e, item)}
-              onPointerLeave={(e) => endPress(e, item)}
-              onPointerCancel={(e) => endPress(e, item)}
-              aria-label={`balloon tier ${item.tier}`}
             />
           )
         })}
+
+        {status === 'playing' && (
+          <div
+            className="avatar"
+            style={{ transform: `translate(${avatar.x}px, ${avatar.y}px) translate(-50%, -50%) rotate(${avatar.rotation}deg)` }}
+          />
+        )}
 
         {status === 'idle' && (
           <div className="overlay">
             <div className="overlay-card">
               <div className="overlay-emoji">🎈</div>
               <h1>Tappers</h1>
-              <p>Pop balloons before they drift off.</p>
-              <p className="hint">Big ones are tougher — press and hold.</p>
+              <p>Tap where you want to go — your arrow takes time to get there.</p>
+              <p className="hint">Touch a balloon to pop it. Big ones need lingering contact.</p>
               <button className="primary" onClick={startGame}>Start</button>
             </div>
           </div>

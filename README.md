@@ -1,6 +1,6 @@
 # Tappers
 
-Tap/pop balloons before they drift off. Small ones pop on tap, bigger ones need a press-and-hold, and popping splashes colored water matching the balloon's color.
+Tap where you want to go — your arrow avatar takes time to travel there, which is the challenge. Touch a balloon with the arrow to pop it; small ones pop on contact, bigger ones need the arrow to linger. Popping splashes colored water matching the balloon's color.
 
 Phase 1: single player. Planned: play against a robot, then real two-player.
 
