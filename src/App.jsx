@@ -7,7 +7,8 @@ const MAX_ITEMS = 8
 const MIN_LIFESPAN_MS = 1800
 const MAX_LIFESPAN_MS = 3200
 const SPEED = 60 // px per second
-const SPLASH_DURATION_MS = 550
+const FLASH_DURATION_MS = 260
+const DROP_GRAVITY = 480 // px/s^2
 
 // toughness tiers: size range, required hold time, score value
 const TIERS = [
@@ -18,7 +19,7 @@ const TIERS = [
 const TIER_WEIGHTS = [0.55, 0.3, 0.15]
 
 let nextId = 1
-let nextSplashId = 1
+let nextParticleId = 1
 
 function randomBetween(min, max) {
   return min + Math.random() * (max - min)
@@ -32,6 +33,43 @@ function pickTier() {
     if (roll <= acc) return TIERS[i]
   }
   return TIERS[0]
+}
+
+function burstParticles(item, now) {
+  const cx = item.x + item.size / 2
+  const cy = item.y + item.size / 2
+  const particles = [
+    {
+      id: nextParticleId++,
+      type: 'flash',
+      x: cx,
+      y: cy,
+      size: item.size * 1.5,
+      hue: item.hue,
+      bornAt: now,
+      life: FLASH_DURATION_MS,
+    },
+  ]
+  const dropCount = 6 + item.tier * 3
+  const baseSpeed = 90 + item.tier * 50
+  for (let i = 0; i < dropCount; i++) {
+    const angle = (Math.PI * 2 * i) / dropCount + randomBetween(-0.3, 0.3)
+    const speed = randomBetween(baseSpeed * 0.6, baseSpeed * 1.3)
+    particles.push({
+      id: nextParticleId++,
+      type: 'drop',
+      x: cx,
+      y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 40,
+      size: randomBetween(5, 8) + item.tier * 1.5,
+      hue: item.hue,
+      bornAt: now,
+      life: randomBetween(500, 800),
+      rotation: (angle * 180) / Math.PI,
+    })
+  }
+  return particles
 }
 
 function makeItem(boundsWidth, boundsHeight) {
@@ -60,7 +98,7 @@ function makeItem(boundsWidth, boundsHeight) {
 export default function App() {
   const [status, setStatus] = useState('idle') // idle | playing | over
   const [items, setItems] = useState([])
-  const [splashes, setSplashes] = useState([])
+  const [particles, setParticles] = useState([])
   const [score, setScore] = useState(0)
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS)
   const [missed, setMissed] = useState(0)
@@ -68,7 +106,7 @@ export default function App() {
 
   const arenaRef = useRef(null)
   const itemsRef = useRef([])
-  const splashesRef = useRef([])
+  const particlesRef = useRef([])
   const pressingRef = useRef(null) // { id, start }
   const rafRef = useRef(null)
   const lastSpawnRef = useRef(0)
@@ -76,7 +114,7 @@ export default function App() {
   const endAtRef = useRef(0)
 
   itemsRef.current = items
-  splashesRef.current = splashes
+  particlesRef.current = particles
 
   const stopLoop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -117,17 +155,7 @@ export default function App() {
         pressingRef.current = null
       } else if (now - pressing.start >= pressedItem.holdMs) {
         itemsRef.current = itemsRef.current.filter((i) => i.id !== pressedItem.id)
-        splashesRef.current = [
-          ...splashesRef.current,
-          {
-            id: nextSplashId++,
-            x: pressedItem.x + pressedItem.size / 2,
-            y: pressedItem.y + pressedItem.size / 2,
-            size: pressedItem.size,
-            hue: pressedItem.hue,
-            bornAt: now,
-          },
-        ]
+        particlesRef.current = [...particlesRef.current, ...burstParticles(pressedItem, now)]
         setScore((s) => s + pressedItem.points)
         pressingRef.current = null
         setPressedId(null)
@@ -149,11 +177,16 @@ export default function App() {
     })
     if (missedThisFrame > 0) setMissed((m) => m + missedThisFrame)
 
-    // age out splashes
-    splashesRef.current = splashesRef.current.filter((s) => now - s.bornAt < SPLASH_DURATION_MS)
+    // move + fade particles (water droplets fall with gravity, flash just fades)
+    particlesRef.current = particlesRef.current
+      .map((p) => {
+        if (p.type !== 'drop') return p
+        return { ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vy: p.vy + DROP_GRAVITY * dt }
+      })
+      .filter((p) => now - p.bornAt < p.life)
 
     setItems(itemsRef.current)
-    setSplashes(splashesRef.current)
+    setParticles(particlesRef.current)
 
     const remainingMs = endAtRef.current - now
     if (remainingMs <= 0) {
@@ -169,10 +202,10 @@ export default function App() {
 
   const startGame = useCallback(() => {
     itemsRef.current = []
-    splashesRef.current = []
+    particlesRef.current = []
     pressingRef.current = null
     setItems([])
-    setSplashes([])
+    setParticles([])
     setPressedId(null)
     setScore(0)
     setMissed(0)
@@ -207,27 +240,58 @@ export default function App() {
   return (
     <div className="app">
       <header className="hud">
-        <div className="hud-stat">Score: {score}</div>
-        <div className="hud-stat">Time: {timeLeft}s</div>
-        <div className="hud-stat">Missed: {missed}</div>
+        <div className="hud-stat">
+          <span className="hud-icon">⭐</span>
+          <span className="hud-value">{score}</span>
+        </div>
+        <div className="hud-stat hud-stat--time">
+          <span className="hud-icon">⏱</span>
+          <span className="hud-value">{timeLeft}s</span>
+        </div>
+        <div className="hud-stat">
+          <span className="hud-icon">💥</span>
+          <span className="hud-value">{missed}</span>
+        </div>
       </header>
+      <div className="time-bar-track">
+        <div className="time-bar-fill" style={{ width: `${(timeLeft / ROUND_SECONDS) * 100}%` }} />
+      </div>
 
       <div className="arena" ref={arenaRef}>
-        {splashes.map((s) => {
-          const progress = Math.min(1, (performance.now() - s.bornAt) / SPLASH_DURATION_MS)
-          const scale = 1 + progress * 1.6
+        {particles.map((p) => {
+          if (p.type === 'flash') {
+            const progress = Math.min(1, (performance.now() - p.bornAt) / p.life)
+            const scale = 0.3 + progress * 1.3
+            return (
+              <div
+                key={p.id}
+                className="flash"
+                style={{
+                  width: p.size,
+                  height: p.size,
+                  left: p.x - p.size / 2,
+                  top: p.y - p.size / 2,
+                  transform: `scale(${scale})`,
+                  opacity: 1 - progress,
+                  '--hue': p.hue,
+                }}
+              />
+            )
+          }
+          const progress = Math.min(1, (performance.now() - p.bornAt) / p.life)
+          const stretch = 1 + Math.min(1.4, Math.hypot(p.vx, p.vy) / 180)
           return (
             <div
-              key={s.id}
-              className="splash"
+              key={p.id}
+              className="drop"
               style={{
-                width: s.size,
-                height: s.size,
-                left: s.x - s.size / 2,
-                top: s.y - s.size / 2,
-                background: `radial-gradient(circle, hsla(${s.hue},90%,60%,0.85), hsla(${s.hue},90%,60%,0) 70%)`,
-                transform: `scale(${scale})`,
-                opacity: 1 - progress,
+                width: p.size,
+                height: p.size,
+                left: p.x - p.size / 2,
+                top: p.y - p.size / 2,
+                transform: `rotate(${p.rotation}deg) scaleX(${stretch})`,
+                opacity: 1 - progress * progress,
+                '--hue': p.hue,
               }}
             />
           )
@@ -248,11 +312,8 @@ export default function App() {
                 width: item.size,
                 height: item.size,
                 transform: `translate(${item.x}px, ${item.y}px) rotate(${item.rotation}deg) scale(${squish})`,
-                background: `radial-gradient(circle at 35% 30%, hsl(${item.hue} 95% 75%), hsl(${item.hue} 85% 50%))`,
                 opacity: Math.min(1, lifeLeft + 0.2),
-                boxShadow: isPressed
-                  ? `0 0 0 4px hsla(${item.hue},90%,70%,0.9), 0 4px 14px rgba(0,0,0,0.4)`
-                  : undefined,
+                '--hue': item.hue,
               }}
               onPointerDown={(e) => beginPress(e, item)}
               onPointerUp={(e) => endPress(e, item)}
@@ -265,19 +326,33 @@ export default function App() {
 
         {status === 'idle' && (
           <div className="overlay">
-            <h1>Tappers</h1>
-            <p>Pop balloons before they drift off.</p>
-            <p>Big ones are tougher — press and hold.</p>
-            <button className="primary" onClick={startGame}>Start</button>
+            <div className="overlay-card">
+              <div className="overlay-emoji">🎈</div>
+              <h1>Tappers</h1>
+              <p>Pop balloons before they drift off.</p>
+              <p className="hint">Big ones are tougher — press and hold.</p>
+              <button className="primary" onClick={startGame}>Start</button>
+            </div>
           </div>
         )}
 
         {status === 'over' && (
           <div className="overlay">
-            <h1>Time's up!</h1>
-            <p>Score: {score}</p>
-            <p>Missed: {missed}</p>
-            <button className="primary" onClick={startGame}>Play again</button>
+            <div className="overlay-card">
+              <div className="overlay-emoji">💦</div>
+              <h1>Time's up!</h1>
+              <div className="result-row">
+                <div className="result-stat">
+                  <span className="result-value">{score}</span>
+                  <span className="result-label">Score</span>
+                </div>
+                <div className="result-stat">
+                  <span className="result-value">{missed}</span>
+                  <span className="result-label">Missed</span>
+                </div>
+              </div>
+              <button className="primary" onClick={startGame}>Play again</button>
+            </div>
           </div>
         )}
       </div>
