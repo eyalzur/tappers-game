@@ -2,8 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 
 const ROUND_SECONDS = 60
-const SPAWN_INTERVAL_MS = 650
-const MAX_ITEMS = 8
 const MIN_LIFESPAN_MS = 1800
 const MAX_LIFESPAN_MS = 3200
 const SPEED = 60 // px per second
@@ -13,6 +11,20 @@ const DROP_GRAVITY = 480 // px/s^2
 const AVATAR_HIT_RADIUS = 15
 const AVATAR_CHASE_RATE = 7 // higher = snappier catch-up to the finger; the lag is the challenge
 const PING_DURATION_MS = 400
+
+// difficulty ramps up over the round — this is what makes it hard
+const SPAWN_INTERVAL_START = 650
+const SPAWN_INTERVAL_END = 300
+const MAX_ITEMS_START = 8
+const MAX_ITEMS_END = 13
+const SPEED_MULT_END = 2
+const BOMB_CHANCE_START = 0.05
+const BOMB_CHANCE_END = 0.32
+
+const BOMB_PENALTY = 4
+const STUN_MS = 650
+const COMBO_WINDOW_MS = 900
+const MAX_COMBO_MULT = 5
 
 // size range + score value per balloon tier — pops in a single touch
 const TIERS = [
@@ -28,6 +40,10 @@ let nextPingId = 1
 
 function randomBetween(min, max) {
   return min + Math.random() * (max - min)
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t
 }
 
 function pickTier() {
@@ -77,13 +93,57 @@ function burstParticles(item, now) {
   return particles
 }
 
-function makeItem(boundsWidth, boundsHeight) {
+function explodeBomb(item, now) {
+  const cx = item.x + item.size / 2
+  const cy = item.y + item.size / 2
+  const particles = [
+    { id: nextParticleId++, type: 'shock', x: cx, y: cy, size: item.size * 1.8, bornAt: now, life: 220 },
+  ]
+  for (let i = 0; i < 10; i++) {
+    const angle = (Math.PI * 2 * i) / 10 + randomBetween(-0.3, 0.3)
+    const speed = randomBetween(50, 130)
+    particles.push({
+      id: nextParticleId++,
+      type: 'smoke',
+      x: cx,
+      y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 30,
+      size: randomBetween(8, 16),
+      bornAt: now,
+      life: randomBetween(500, 850),
+    })
+  }
+  return particles
+}
+
+function makeItem(boundsWidth, boundsHeight, speedMult, bombChance) {
+  const isBomb = Math.random() < bombChance
+  const angle = Math.random() * Math.PI * 2
+  if (isBomb) {
+    const size = randomBetween(50, 66)
+    const speed = randomBetween(SPEED * 0.5, SPEED * 1.0) * speedMult
+    return {
+      id: nextId++,
+      type: 'bomb',
+      x: randomBetween(0, Math.max(0, boundsWidth - size)),
+      y: randomBetween(0, Math.max(0, boundsHeight - size)),
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size,
+      rotation: Math.random() * 360,
+      spin: randomBetween(-80, 80),
+      bornAt: performance.now(),
+      lifespan: randomBetween(MIN_LIFESPAN_MS, MAX_LIFESPAN_MS),
+      points: -BOMB_PENALTY,
+    }
+  }
   const tier = pickTier()
   const size = randomBetween(tier.minSize, tier.maxSize)
-  const angle = Math.random() * Math.PI * 2
-  const speed = randomBetween(SPEED * 0.6, SPEED * 1.4)
+  const speed = randomBetween(SPEED * 0.6, SPEED * 1.4) * speedMult
   return {
     id: nextId++,
+    type: 'balloon',
     x: randomBetween(0, Math.max(0, boundsWidth - size)),
     y: randomBetween(0, Math.max(0, boundsHeight - size)),
     vx: Math.cos(angle) * speed,
@@ -108,6 +168,7 @@ export default function App() {
   const [score, setScore] = useState(0)
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS)
   const [missed, setMissed] = useState(0)
+  const [combo, setCombo] = useState(1)
 
   const arenaRef = useRef(null)
   const itemsRef = useRef([])
@@ -120,6 +181,10 @@ export default function App() {
   const lastSpawnRef = useRef(0)
   const lastFrameRef = useRef(0)
   const endAtRef = useRef(0)
+  const roundStartRef = useRef(0)
+  const comboCountRef = useRef(0)
+  const lastPopAtRef = useRef(0)
+  const stunnedUntilRef = useRef(0)
 
   itemsRef.current = items
   particlesRef.current = particles
@@ -139,9 +204,15 @@ export default function App() {
     const dt = lastFrameRef.current ? (now - lastFrameRef.current) / 1000 : 0
     lastFrameRef.current = now
 
-    if (now - lastSpawnRef.current > SPAWN_INTERVAL_MS && itemsRef.current.length < MAX_ITEMS) {
+    const frac = Math.min(1, Math.max(0, (now - roundStartRef.current) / (ROUND_SECONDS * 1000)))
+    const spawnInterval = lerp(SPAWN_INTERVAL_START, SPAWN_INTERVAL_END, frac)
+    const maxItems = Math.round(lerp(MAX_ITEMS_START, MAX_ITEMS_END, frac))
+    const speedMult = lerp(1, SPEED_MULT_END, frac)
+    const bombChance = lerp(BOMB_CHANCE_START, BOMB_CHANCE_END, frac)
+
+    if (now - lastSpawnRef.current > spawnInterval && itemsRef.current.length < maxItems) {
       lastSpawnRef.current = now
-      itemsRef.current = [...itemsRef.current, makeItem(bounds.width, bounds.height)]
+      itemsRef.current = [...itemsRef.current, makeItem(bounds.width, bounds.height, speedMult, bombChance)]
     }
 
     // move + spin balloons
@@ -157,8 +228,10 @@ export default function App() {
     })
 
     // chase the finger: avatar eases toward its target, always lagging a bit behind
+    // (frozen while stunned from a bomb hit)
     const av = avatarRef.current
-    if (av.targetX != null) {
+    const isStunned = now < stunnedUntilRef.current
+    if (!isStunned && av.targetX != null) {
       const dx = av.targetX - av.x
       const dy = av.targetY - av.y
       const dist = Math.hypot(dx, dy)
@@ -173,41 +246,68 @@ export default function App() {
       }
     }
 
-    // pop every balloon the arrow is touching right now — one hit, no lingering needed
+    // pop every balloon/bomb the arrow is touching right now — one hit, no lingering needed
     const avCx = av.x
     const avCy = av.y
-    const popped = []
+    const poppedBalloons = []
+    const poppedBombs = []
     itemsRef.current = itemsRef.current.filter((item) => {
       const icx = item.x + item.size / 2
       const icy = item.y + item.size / 2
       const touchRadius = AVATAR_HIT_RADIUS + item.size * 0.4
       if (Math.hypot(avCx - icx, avCy - icy) <= touchRadius) {
-        popped.push(item)
+        if (item.type === 'bomb') poppedBombs.push(item)
+        else poppedBalloons.push(item)
         return false
       }
       return true
     })
-    if (popped.length > 0) {
-      for (const item of popped) {
-        particlesRef.current = [...particlesRef.current, ...burstParticles(item, now)]
+
+    if (poppedBombs.length > 0) {
+      for (const bomb of poppedBombs) {
+        particlesRef.current = [...particlesRef.current, ...explodeBomb(bomb, now)]
       }
-      setScore((s) => s + popped.reduce((sum, item) => sum + item.points, 0))
+      stunnedUntilRef.current = now + STUN_MS
+      comboCountRef.current = 0
+      setScore((s) => Math.max(0, s - BOMB_PENALTY * poppedBombs.length))
     }
 
-    // expire items past lifespan
+    if (poppedBalloons.length > 0) {
+      let frameScoreDelta = 0
+      for (const item of poppedBalloons) {
+        comboCountRef.current = now - lastPopAtRef.current <= COMBO_WINDOW_MS ? comboCountRef.current + 1 : 1
+        lastPopAtRef.current = now
+        const multiplier = Math.min(MAX_COMBO_MULT, 1 + Math.floor(comboCountRef.current / 3))
+        frameScoreDelta += item.points * multiplier
+        particlesRef.current = [...particlesRef.current, ...burstParticles(item, now)]
+      }
+      setScore((s) => s + frameScoreDelta)
+    }
+
+    if (comboCountRef.current > 0 && now - lastPopAtRef.current > COMBO_WINDOW_MS) {
+      comboCountRef.current = 0
+    }
+    setCombo(Math.min(MAX_COMBO_MULT, 1 + Math.floor(comboCountRef.current / 3)))
+
+    // expire items past lifespan (bombs drift off harmlessly — only missed balloons count)
     let missedThisFrame = 0
     itemsRef.current = itemsRef.current.filter((item) => {
       const alive = now - item.bornAt < item.lifespan
-      if (!alive) missedThisFrame += 1
+      if (!alive && item.type === 'balloon') missedThisFrame += 1
       return alive
     })
     if (missedThisFrame > 0) setMissed((m) => m + missedThisFrame)
 
-    // move + fade particles (water droplets fall with gravity, flash just fades)
+    // move + fade particles (water droplets + smoke fall/float with physics, flashes just fade)
     particlesRef.current = particlesRef.current
       .map((p) => {
-        if (p.type !== 'drop') return p
-        return { ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vy: p.vy + DROP_GRAVITY * dt }
+        if (p.type === 'drop') {
+          return { ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vy: p.vy + DROP_GRAVITY * dt }
+        }
+        if (p.type === 'smoke') {
+          return { ...p, x: p.x + p.vx * dt, y: p.y + p.vy * dt, vx: p.vx * 0.96, vy: p.vy * 0.96 }
+        }
+        return p
       })
       .filter((p) => now - p.bornAt < p.life)
 
@@ -241,6 +341,9 @@ export default function App() {
     pingsRef.current = []
     isDraggingRef.current = false
     avatarRef.current = { x: startX, y: startY, rotation: 0, targetX: null, targetY: null }
+    comboCountRef.current = 0
+    lastPopAtRef.current = 0
+    stunnedUntilRef.current = 0
 
     setItems([])
     setParticles([])
@@ -248,10 +351,12 @@ export default function App() {
     setAvatar({ x: startX, y: startY, rotation: 0 })
     setScore(0)
     setMissed(0)
+    setCombo(1)
     setTimeLeft(ROUND_SECONDS)
     lastSpawnRef.current = 0
     lastFrameRef.current = 0
-    endAtRef.current = performance.now() + ROUND_SECONDS * 1000
+    roundStartRef.current = performance.now()
+    endAtRef.current = roundStartRef.current + ROUND_SECONDS * 1000
     setStatus('playing')
   }, [])
 
@@ -307,6 +412,10 @@ export default function App() {
           <span className="hud-icon">💥</span>
           <span className="hud-value">{missed}</span>
         </div>
+        <div className={`hud-stat hud-combo${combo > 1 ? ' hot' : ''}`}>
+          <span className="hud-icon">🔥</span>
+          <span className="hud-value">x{combo}</span>
+        </div>
       </header>
       <div className="time-bar-track">
         <div className="time-bar-fill" style={{ width: `${(timeLeft / ROUND_SECONDS) * 100}%` }} />
@@ -337,13 +446,13 @@ export default function App() {
         })}
 
         {particles.map((p) => {
-          if (p.type === 'flash') {
+          if (p.type === 'flash' || p.type === 'shock') {
             const progress = Math.min(1, (performance.now() - p.bornAt) / p.life)
             const scale = 0.3 + progress * 1.3
             return (
               <div
                 key={p.id}
-                className="flash"
+                className={p.type}
                 style={{
                   width: p.size,
                   height: p.size,
@@ -352,6 +461,23 @@ export default function App() {
                   transform: `scale(${scale})`,
                   opacity: 1 - progress,
                   '--hue': p.hue,
+                }}
+              />
+            )
+          }
+          if (p.type === 'smoke') {
+            const progress = Math.min(1, (performance.now() - p.bornAt) / p.life)
+            return (
+              <div
+                key={p.id}
+                className="smoke"
+                style={{
+                  width: p.size,
+                  height: p.size,
+                  left: p.x - p.size / 2,
+                  top: p.y - p.size / 2,
+                  transform: `scale(${1 + progress * 0.8})`,
+                  opacity: 1 - progress,
                 }}
               />
             )
@@ -381,7 +507,7 @@ export default function App() {
           return (
             <div
               key={item.id}
-              className="balloon"
+              className={item.type === 'bomb' ? 'bomb' : 'balloon'}
               style={{
                 width: item.size,
                 height: item.size,
@@ -398,10 +524,12 @@ export default function App() {
             className="avatar"
             style={{ transform: `translate(${avatar.x}px, ${avatar.y}px) rotate(${avatar.rotation}deg)` }}
           >
-            <div className="avatar-fletch avatar-fletch-left" />
-            <div className="avatar-fletch avatar-fletch-right" />
-            <div className="avatar-shaft" />
-            <div className="avatar-head" />
+            <div className={`avatar-inner${performance.now() < stunnedUntilRef.current ? ' stunned' : ''}`}>
+              <div className="avatar-fletch avatar-fletch-left" />
+              <div className="avatar-fletch avatar-fletch-right" />
+              <div className="avatar-shaft" />
+              <div className="avatar-head" />
+            </div>
           </div>
         )}
 
@@ -411,7 +539,8 @@ export default function App() {
               <div className="overlay-emoji">🎈</div>
               <h1>Tappers</h1>
               <p>Swipe to steer your arrow — it trails just behind your finger.</p>
-              <p className="hint">One touch pops a balloon. Chain your swipe through a few!</p>
+              <p className="hint">Chain pops for combo points. Dodge the spiky bombs — they sting and stun!</p>
+              <p className="hint">It only gets faster from here.</p>
               <button className="primary" onClick={startGame}>Start</button>
             </div>
           </div>
