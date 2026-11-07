@@ -104,12 +104,12 @@
   height: 0;
 }
 
-.avatar-inner.stunned {
-  animation: avatar-shake 160ms ease-in-out infinite;
+.avatar-inner.slowed {
+  animation: avatar-wobble 420ms ease-in-out infinite;
 }
 
-.avatar-inner.stunned .avatar-shaft,
-.avatar-inner.stunned .avatar-head {
+.avatar-inner.slowed .avatar-shaft,
+.avatar-inner.slowed .avatar-head {
   filter: grayscale(0.4) sepia(1) hue-rotate(-50deg) saturate(4) brightness(0.9);
 }
 
@@ -152,10 +152,31 @@
   transform: rotate(24deg);
 }
 
-@keyframes avatar-shake {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-3px) rotate(-4deg); }
-  75% { transform: translateX(3px) rotate(4deg); }
+@keyframes avatar-wobble {
+  0%, 100% { transform: translateX(0) rotate(0); }
+  50% { transform: translateX(-1.5px) rotate(-2deg); }
+}
+
+.slow-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px 3px 5px;
+  margin-top: -46px;
+  margin-left: -20px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(70, 40, 20, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
 }
 
 .balloon {

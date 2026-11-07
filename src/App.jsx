@@ -31,9 +31,14 @@ const AVATAR_HIT_RADIUS = 17
 const TOUCH_SIZE_FACTOR = 0.45
 
 const BOMB_PENALTY = 6
-const STUN_MS_START = 650
-const STUN_MS_END = 1000
-const STUN_SLOW_FACTOR = 0.5 // bomb hit halves the arrow's chase speed instead of freezing it outright
+// hitting a slow-down balloon multiplies chase speed by this for SLOW_DURATION_MS;
+// hitting another one while it's still active stacks: speed drops another 10%
+// and the remaining time gets +1s, instead of just re-triggering the same slow
+const SLOW_MULTIPLIER = 0.5
+const SLOW_DURATION_MS = 3000
+const SLOW_STACK_FACTOR = 0.9
+const SLOW_STACK_EXTEND_MS = 1000
+const SLOW_MULTIPLIER_MIN = 0.15
 const MISS_PENALTY = 1
 const COMBO_WINDOW_MS = 750
 const MAX_COMBO_MULT = 5
@@ -181,6 +186,7 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS)
   const [missed, setMissed] = useState(0)
   const [combo, setCombo] = useState(1)
+  const [slow, setSlow] = useState({ active: false, until: 0 })
 
   const arenaRef = useRef(null)
   const itemsRef = useRef([])
@@ -196,7 +202,7 @@ export default function App() {
   const roundStartRef = useRef(0)
   const comboCountRef = useRef(0)
   const lastPopAtRef = useRef(0)
-  const stunnedUntilRef = useRef(0)
+  const slowRef = useRef({ until: 0, multiplier: 1 })
 
   itemsRef.current = items
   particlesRef.current = particles
@@ -224,7 +230,6 @@ export default function App() {
     const lifespanMin = lerp(MIN_LIFESPAN_START, MIN_LIFESPAN_END, frac)
     const lifespanMax = lerp(MAX_LIFESPAN_START, MAX_LIFESPAN_END, frac)
     const chaseRate = lerp(AVATAR_CHASE_RATE_START, AVATAR_CHASE_RATE_END, frac)
-    const stunMs = lerp(STUN_MS_START, STUN_MS_END, frac)
 
     if (now - lastSpawnRef.current > spawnInterval && itemsRef.current.length < maxItems) {
       lastSpawnRef.current = now
@@ -247,10 +252,10 @@ export default function App() {
     })
 
     // chase the finger: avatar eases toward its target, always lagging a bit behind
-    // (bogged down, not frozen, while stunned from a bomb hit)
+    // (further bogged down by a stacking slow multiplier while a slow-down balloon is active)
     const av = avatarRef.current
-    const isStunned = now < stunnedUntilRef.current
-    const effectiveChaseRate = isStunned ? chaseRate * STUN_SLOW_FACTOR : chaseRate
+    const isSlowed = now < slowRef.current.until
+    const effectiveChaseRate = isSlowed ? chaseRate * slowRef.current.multiplier : chaseRate
     if (av.targetX != null) {
       const dx = av.targetX - av.x
       const dy = av.targetY - av.y
@@ -286,8 +291,16 @@ export default function App() {
     if (poppedBombs.length > 0) {
       for (const bomb of poppedBombs) {
         particlesRef.current = [...particlesRef.current, ...explodeBomb(bomb, now)]
+        if (now < slowRef.current.until) {
+          // already slowed: stack it — another 10% off speed, +1s on the clock
+          slowRef.current.multiplier = Math.max(SLOW_MULTIPLIER_MIN, slowRef.current.multiplier * SLOW_STACK_FACTOR)
+          slowRef.current.until += SLOW_STACK_EXTEND_MS
+        } else {
+          slowRef.current.multiplier = SLOW_MULTIPLIER
+          slowRef.current.until = now + SLOW_DURATION_MS
+        }
       }
-      stunnedUntilRef.current = now + stunMs
+      setSlow({ active: true, until: slowRef.current.until })
       comboCountRef.current = 0
       setScore((s) => Math.max(0, s - BOMB_PENALTY * poppedBombs.length))
     }
@@ -337,6 +350,11 @@ export default function App() {
     // age out tap pings
     pingsRef.current = pingsRef.current.filter((p) => now - p.bornAt < PING_DURATION_MS)
 
+    if (slowRef.current.until !== 0 && now >= slowRef.current.until) {
+      slowRef.current = { until: 0, multiplier: 1 }
+      setSlow({ active: false, until: 0 })
+    }
+
     setItems(itemsRef.current)
     setParticles(particlesRef.current)
     setPings(pingsRef.current)
@@ -366,7 +384,7 @@ export default function App() {
     avatarRef.current = { x: startX, y: startY, rotation: 0, targetX: null, targetY: null }
     comboCountRef.current = 0
     lastPopAtRef.current = 0
-    stunnedUntilRef.current = 0
+    slowRef.current = { until: 0, multiplier: 1 }
 
     setItems([])
     setParticles([])
@@ -375,6 +393,7 @@ export default function App() {
     setScore(0)
     setMissed(0)
     setCombo(1)
+    setSlow({ active: false, until: 0 })
     setTimeLeft(ROUND_SECONDS)
     lastSpawnRef.current = 0
     lastFrameRef.current = 0
@@ -547,12 +566,21 @@ export default function App() {
             className="avatar"
             style={{ transform: `translate(${avatar.x}px, ${avatar.y}px) rotate(${avatar.rotation}deg)` }}
           >
-            <div className={`avatar-inner${performance.now() < stunnedUntilRef.current ? ' stunned' : ''}`}>
+            <div className={`avatar-inner${slow.active ? ' slowed' : ''}`}>
               <div className="avatar-fletch avatar-fletch-left" />
               <div className="avatar-fletch avatar-fletch-right" />
               <div className="avatar-shaft" />
               <div className="avatar-head" />
             </div>
+          </div>
+        )}
+
+        {status === 'playing' && slow.active && (
+          <div
+            className="slow-badge"
+            style={{ transform: `translate(${avatar.x}px, ${avatar.y}px)` }}
+          >
+            🐌 {Math.max(0, (slow.until - performance.now()) / 1000).toFixed(1)}s
           </div>
         )}
 
@@ -562,7 +590,7 @@ export default function App() {
               <div className="overlay-emoji">🎈</div>
               <h1>Tappers</h1>
               <p>Swipe to steer your arrow — it's slow and heavy, so lead your swipes.</p>
-              <p className="hint">Chain pops for combo points. Dodge the spiky bombs — they sting and stun!</p>
+              <p className="hint">Chain pops for combo points. Dodge the spiky balloons — they sting and slow you, and stack if you hit more!</p>
               <p className="hint">Letting one vanish costs you too. It only gets faster from here.</p>
               <button className="primary" onClick={startGame}>Start</button>
             </div>
