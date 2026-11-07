@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
+import { playGameOver, playMiss, playPop, playSlowHit, playStart, resumeAudio, setMuted, startMusic, stopMusic } from './audio'
 
 const ROUND_SECONDS = 60
 const SPEED = 60 // px per second
@@ -187,6 +188,14 @@ export default function App() {
   const [missed, setMissed] = useState(0)
   const [combo, setCombo] = useState(1)
   const [slow, setSlow] = useState({ active: false, until: 0 })
+  const [impactId, setImpactId] = useState(0)
+  const [muted, setMutedState] = useState(() => {
+    try {
+      return localStorage.getItem('tappers-muted') === '1'
+    } catch {
+      return false
+    }
+  })
 
   const arenaRef = useRef(null)
   const itemsRef = useRef([])
@@ -207,6 +216,15 @@ export default function App() {
   itemsRef.current = items
   particlesRef.current = particles
   pingsRef.current = pings
+
+  useEffect(() => {
+    setMuted(muted)
+    try {
+      localStorage.setItem('tappers-muted', muted ? '1' : '0')
+    } catch {
+      // ignore storage errors (e.g. private mode)
+    }
+  }, [muted])
 
   const stopLoop = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -291,7 +309,8 @@ export default function App() {
     if (poppedBombs.length > 0) {
       for (const bomb of poppedBombs) {
         particlesRef.current = [...particlesRef.current, ...explodeBomb(bomb, now)]
-        if (now < slowRef.current.until) {
+        const stacked = now < slowRef.current.until
+        if (stacked) {
           // already slowed: stack it — another 10% off speed, +1s on the clock
           slowRef.current.multiplier = Math.max(SLOW_MULTIPLIER_MIN, slowRef.current.multiplier * SLOW_STACK_FACTOR)
           slowRef.current.until += SLOW_STACK_EXTEND_MS
@@ -299,8 +318,10 @@ export default function App() {
           slowRef.current.multiplier = SLOW_MULTIPLIER
           slowRef.current.until = now + SLOW_DURATION_MS
         }
+        playSlowHit(stacked)
       }
       setSlow({ active: true, until: slowRef.current.until })
+      setImpactId((v) => v + 1)
       comboCountRef.current = 0
       setScore((s) => Math.max(0, s - BOMB_PENALTY * poppedBombs.length))
     }
@@ -313,6 +334,7 @@ export default function App() {
         const multiplier = Math.min(MAX_COMBO_MULT, 1 + Math.floor(comboCountRef.current / 3))
         frameScoreDelta += item.points * multiplier
         particlesRef.current = [...particlesRef.current, ...burstParticles(item, now)]
+        playPop(item.tier, multiplier)
       }
       setScore((s) => s + frameScoreDelta)
     }
@@ -332,6 +354,7 @@ export default function App() {
     if (missedThisFrame > 0) {
       setMissed((m) => m + missedThisFrame)
       setScore((s) => Math.max(0, s - MISS_PENALTY * missedThisFrame))
+      playMiss()
     }
 
     // move + fade particles (water droplets + smoke fall/float with physics, flashes just fade)
@@ -365,6 +388,8 @@ export default function App() {
       setTimeLeft(0)
       setStatus('over')
       stopLoop()
+      stopMusic()
+      playGameOver()
       return
     }
     setTimeLeft(Math.ceil(remainingMs / 1000))
@@ -394,12 +419,17 @@ export default function App() {
     setMissed(0)
     setCombo(1)
     setSlow({ active: false, until: 0 })
+    setImpactId(0)
     setTimeLeft(ROUND_SECONDS)
     lastSpawnRef.current = 0
     lastFrameRef.current = 0
     roundStartRef.current = performance.now()
     endAtRef.current = roundStartRef.current + ROUND_SECONDS * 1000
     setStatus('playing')
+
+    resumeAudio()
+    playStart()
+    startMusic()
   }, [])
 
   useEffect(() => {
@@ -458,6 +488,9 @@ export default function App() {
           <span className="hud-icon">🔥</span>
           <span className="hud-value">x{combo}</span>
         </div>
+        <button className="mute-toggle" onClick={() => setMutedState((m) => !m)} aria-label="Toggle sound">
+          {muted ? '🔇' : '🔊'}
+        </button>
       </header>
       <div className="time-bar-track">
         <div className="time-bar-fill" style={{ width: `${(timeLeft / ROUND_SECONDS) * 100}%` }} />
@@ -471,6 +504,14 @@ export default function App() {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
       >
+        {impactId > 0 && <div key={impactId} className="screen-impact" />}
+
+        {status === 'playing' && slow.active && (
+          <div className="slow-badge">
+            🐌 {Math.max(0, (slow.until - performance.now()) / 1000).toFixed(1)}s
+          </div>
+        )}
+
         {pings.map((p) => {
           const progress = Math.min(1, (performance.now() - p.bornAt) / PING_DURATION_MS)
           return (
@@ -572,15 +613,6 @@ export default function App() {
               <div className="avatar-shaft" />
               <div className="avatar-head" />
             </div>
-          </div>
-        )}
-
-        {status === 'playing' && slow.active && (
-          <div
-            className="slow-badge"
-            style={{ transform: `translate(${avatar.x}px, ${avatar.y}px)` }}
-          >
-            🐌 {Math.max(0, (slow.until - performance.now()) / 1000).toFixed(1)}s
           </div>
         )}
 
