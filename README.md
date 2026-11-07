@@ -1,6 +1,6 @@
 # Tappers
 
-Swipe to steer a thin wooden arrow that trails just behind your finger — the lag is the challenge. One touch pops any balloon it crosses, so a good swipe can chain several at once for a combo multiplier. Spiky bombs are mixed in: pop one and it costs points, breaks your combo, and stuns your arrow for a moment. Letting a balloon vanish costs points too. Spawn rate, balloon speed, bomb frequency, and balloon lifespan all ramp up as the round goes on — and the arrow's catch-up speed and touch window shrink right along with it, so the back half demands real precision.
+Swipe to steer a thin wooden arrow that's deliberately slow and heavy — it trails well behind your finger, so you have to lead your swipes and anticipate where a balloon is headed, Fruit-Ninja style. One touch pops any balloon it crosses, so a good lead swipe can chain several at once for a combo multiplier. Spiky bombs are mixed in: pop one and it costs points, breaks your combo, and stuns your arrow for a moment. Letting a balloon vanish costs points too. Spawn rate, balloon speed, bomb frequency, and balloon lifespan all ramp up as the round goes on, and the arrow gets even heavier to steer.
 
 Phase 1: single player. Planned: play against a robot, then real two-player.
 

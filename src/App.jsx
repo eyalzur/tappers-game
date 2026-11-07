@@ -23,13 +23,12 @@ const MIN_LIFESPAN_END = 1100
 const MAX_LIFESPAN_START = 3200
 const MAX_LIFESPAN_END = 2000
 
-// control gets twitchier under pressure: catch-up slows and the touch window shrinks
-const AVATAR_CHASE_RATE_START = 7
-const AVATAR_CHASE_RATE_END = 4.3
-const AVATAR_HIT_RADIUS_START = 15
-const AVATAR_HIT_RADIUS_END = 7
-const TOUCH_SIZE_FACTOR_START = 0.4
-const TOUCH_SIZE_FACTOR_END = 0.22
+// the arrow is slow and heavy on purpose — out-running its own lag behind
+// the finger, not fiddly hit detection, is the actual challenge
+const AVATAR_CHASE_RATE_START = 3.2
+const AVATAR_CHASE_RATE_END = 1.9
+const AVATAR_HIT_RADIUS = 17
+const TOUCH_SIZE_FACTOR = 0.45
 
 const BOMB_PENALTY = 6
 const STUN_MS_START = 650
@@ -224,8 +223,6 @@ export default function App() {
     const lifespanMin = lerp(MIN_LIFESPAN_START, MIN_LIFESPAN_END, frac)
     const lifespanMax = lerp(MAX_LIFESPAN_START, MAX_LIFESPAN_END, frac)
     const chaseRate = lerp(AVATAR_CHASE_RATE_START, AVATAR_CHASE_RATE_END, frac)
-    const hitRadius = lerp(AVATAR_HIT_RADIUS_START, AVATAR_HIT_RADIUS_END, frac)
-    const touchFactor = lerp(TOUCH_SIZE_FACTOR_START, TOUCH_SIZE_FACTOR_END, frac)
     const stunMs = lerp(STUN_MS_START, STUN_MS_END, frac)
 
     if (now - lastSpawnRef.current > spawnInterval && itemsRef.current.length < maxItems) {
@@ -275,7 +272,7 @@ export default function App() {
     itemsRef.current = itemsRef.current.filter((item) => {
       const icx = item.x + item.size / 2
       const icy = item.y + item.size / 2
-      const touchRadius = hitRadius + item.size * touchFactor
+      const touchRadius = AVATAR_HIT_RADIUS + item.size * TOUCH_SIZE_FACTOR
       if (Math.hypot(avCx - icx, avCy - icy) <= touchRadius) {
         if (item.type === 'bomb') poppedBombs.push(item)
         else poppedBalloons.push(item)
@@ -562,9 +559,9 @@ export default function App() {
             <div className="overlay-card">
               <div className="overlay-emoji">🎈</div>
               <h1>Tappers</h1>
-              <p>Swipe to steer your arrow — it trails just behind your finger.</p>
+              <p>Swipe to steer your arrow — it's slow and heavy, so lead your swipes.</p>
               <p className="hint">Chain pops for combo points. Dodge the spiky bombs — they sting and stun!</p>
-              <p className="hint">Letting one pop vanish costs you too. It only gets faster — and tighter.</p>
+              <p className="hint">Letting one vanish costs you too. It only gets faster from here.</p>
               <button className="primary" onClick={startGame}>Start</button>
             </div>
           </div>
