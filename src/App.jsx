@@ -33,6 +33,7 @@ const TOUCH_SIZE_FACTOR = 0.45
 const BOMB_PENALTY = 6
 const STUN_MS_START = 650
 const STUN_MS_END = 1000
+const STUN_SLOW_FACTOR = 0.2 // bomb hit bogs the arrow down instead of freezing it outright
 const MISS_PENALTY = 1
 const COMBO_WINDOW_MS = 750
 const MAX_COMBO_MULT = 5
@@ -246,16 +247,17 @@ export default function App() {
     })
 
     // chase the finger: avatar eases toward its target, always lagging a bit behind
-    // (frozen while stunned from a bomb hit)
+    // (bogged down, not frozen, while stunned from a bomb hit)
     const av = avatarRef.current
     const isStunned = now < stunnedUntilRef.current
-    if (!isStunned && av.targetX != null) {
+    const effectiveChaseRate = isStunned ? chaseRate * STUN_SLOW_FACTOR : chaseRate
+    if (av.targetX != null) {
       const dx = av.targetX - av.x
       const dy = av.targetY - av.y
       const dist = Math.hypot(dx, dy)
       if (dist > 0.4) {
         av.rotation = (Math.atan2(dx, -dy) * 180) / Math.PI
-        const t = 1 - Math.exp(-chaseRate * dt)
+        const t = 1 - Math.exp(-effectiveChaseRate * dt)
         av.x += dx * t
         av.y += dy * t
       } else {
