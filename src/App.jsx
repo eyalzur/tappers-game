@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 import { playGameOver, playMiss, playPop, playSlowHit, playStart, resumeAudio, setMuted, startMusic, stopMusic } from './audio'
 
-const ROUND_SECONDS = 60
+const ROUND_SECONDS_OPTIONS = [30, 60]
 const SPEED = 60 // px per second
 const FLASH_DURATION_MS = 260
 const DROP_GRAVITY = 480 // px/s^2
@@ -43,6 +43,15 @@ const SLOW_MULTIPLIER_MIN = 0.15
 const MISS_PENALTY = 1
 const COMBO_WINDOW_MS = 750
 const MAX_COMBO_MULT = 5
+
+// robot opponent: 3 difficulty levels — faster chase, quicker retargeting,
+// and a slightly bigger touch window at each step up. It only ever goes
+// for balloons, never bombs, so it doesn't need the slow-down mechanic.
+const ROBOT_LEVELS = [
+  { label: 'Easy', chaseRate: 1.6, retargetMs: 700, hitRadius: 14, touchFactor: 0.35 },
+  { label: 'Medium', chaseRate: 2.6, retargetMs: 450, hitRadius: 15, touchFactor: 0.4 },
+  { label: 'Hard', chaseRate: 4.2, retargetMs: 200, hitRadius: 16, touchFactor: 0.45 },
+]
 
 // size range + score value per balloon tier — pops in a single touch
 const TIERS = [
@@ -183,12 +192,17 @@ export default function App() {
   const [particles, setParticles] = useState([])
   const [pings, setPings] = useState([])
   const [avatar, setAvatar] = useState({ x: 0, y: 0, rotation: 0 })
+  const [robotAvatar, setRobotAvatar] = useState({ x: 0, y: 0, rotation: 0 })
   const [score, setScore] = useState(0)
-  const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS)
+  const [robotScore, setRobotScore] = useState(0)
+  const [roundSeconds, setRoundSeconds] = useState(60)
+  const [timeLeft, setTimeLeft] = useState(60)
   const [missed, setMissed] = useState(0)
   const [combo, setCombo] = useState(1)
   const [slow, setSlow] = useState({ active: false, until: 0 })
   const [impactId, setImpactId] = useState(0)
+  const [mode, setMode] = useState('solo') // solo | robot
+  const [levelIndex, setLevelIndex] = useState(1)
   const [muted, setMutedState] = useState(() => {
     try {
       return localStorage.getItem('tappers-muted') === '1'
@@ -202,6 +216,7 @@ export default function App() {
   const particlesRef = useRef([])
   const pingsRef = useRef([])
   const avatarRef = useRef({ x: 0, y: 0, rotation: 0, targetX: null, targetY: null })
+  const robotRef = useRef({ x: 0, y: 0, rotation: 0, targetId: null, lastRetargetAt: 0 })
   const isDraggingRef = useRef(false)
   const lastPingAtRef = useRef(0)
   const rafRef = useRef(null)
@@ -209,6 +224,9 @@ export default function App() {
   const lastFrameRef = useRef(0)
   const endAtRef = useRef(0)
   const roundStartRef = useRef(0)
+  const roundSecondsRef = useRef(60)
+  const modeRef = useRef('solo')
+  const levelRef = useRef(ROBOT_LEVELS[1])
   const comboCountRef = useRef(0)
   const lastPopAtRef = useRef(0)
   const slowRef = useRef({ until: 0, multiplier: 1 })
@@ -240,7 +258,7 @@ export default function App() {
     const dt = lastFrameRef.current ? (now - lastFrameRef.current) / 1000 : 0
     lastFrameRef.current = now
 
-    const frac = Math.min(1, Math.max(0, (now - roundStartRef.current) / (ROUND_SECONDS * 1000)))
+    const frac = Math.min(1, Math.max(0, (now - roundStartRef.current) / (roundSecondsRef.current * 1000)))
     const spawnInterval = lerp(SPAWN_INTERVAL_START, SPAWN_INTERVAL_END, frac)
     const maxItems = Math.round(lerp(MAX_ITEMS_START, MAX_ITEMS_END, frac))
     const speedMult = lerp(1, SPEED_MULT_END, frac)
@@ -344,6 +362,62 @@ export default function App() {
     }
     setCombo(Math.min(MAX_COMBO_MULT, 1 + Math.floor(comboCountRef.current / 3)))
 
+    // robot opponent: always chases the nearest balloon, never targets bombs,
+    // and re-picks its target on a timer (faster/more decisive at higher levels)
+    if (modeRef.current === 'robot') {
+      const level = levelRef.current
+      const rb = robotRef.current
+      let target = rb.targetId != null ? itemsRef.current.find((i) => i.id === rb.targetId && i.type === 'balloon') : null
+      if (!target && now - rb.lastRetargetAt > level.retargetMs) {
+        rb.lastRetargetAt = now
+        let best = null
+        let bestDist = Infinity
+        for (const item of itemsRef.current) {
+          if (item.type !== 'balloon') continue
+          const d = Math.hypot(item.x + item.size / 2 - rb.x, item.y + item.size / 2 - rb.y)
+          if (d < bestDist) { bestDist = d; best = item }
+        }
+        target = best
+        rb.targetId = best ? best.id : null
+      }
+      if (target) {
+        const tx = target.x + target.size / 2
+        const ty = target.y + target.size / 2
+        const dx = tx - rb.x
+        const dy = ty - rb.y
+        const dist = Math.hypot(dx, dy)
+        if (dist > 0.4) {
+          rb.rotation = (Math.atan2(dx, -dy) * 180) / Math.PI
+          const t = 1 - Math.exp(-level.chaseRate * dt)
+          rb.x += dx * t
+          rb.y += dy * t
+        }
+      }
+
+      const robotPopped = []
+      itemsRef.current = itemsRef.current.filter((item) => {
+        if (item.type !== 'balloon') return true
+        const icx = item.x + item.size / 2
+        const icy = item.y + item.size / 2
+        const touchRadius = level.hitRadius + item.size * level.touchFactor
+        if (Math.hypot(rb.x - icx, rb.y - icy) <= touchRadius) {
+          robotPopped.push(item)
+          return false
+        }
+        return true
+      })
+      if (robotPopped.length > 0) {
+        let robotDelta = 0
+        for (const item of robotPopped) {
+          robotDelta += item.points
+          particlesRef.current = [...particlesRef.current, ...burstParticles(item, now)]
+          if (rb.targetId === item.id) rb.targetId = null
+        }
+        setRobotScore((s) => s + robotDelta)
+      }
+      setRobotAvatar({ x: rb.x, y: rb.y, rotation: rb.rotation })
+    }
+
     // expire items past lifespan (bombs drift off harmlessly — only missed balloons count)
     let missedThisFrame = 0
     itemsRef.current = itemsRef.current.filter((item) => {
@@ -401,36 +475,44 @@ export default function App() {
     const bounds = arenaRef.current?.getBoundingClientRect()
     const startX = bounds ? bounds.width / 2 : 0
     const startY = bounds ? bounds.height / 2 : 0
+    const robotStartX = bounds ? bounds.width * 0.25 : 0
+    const robotStartY = bounds ? bounds.height * 0.25 : 0
 
     itemsRef.current = []
     particlesRef.current = []
     pingsRef.current = []
     isDraggingRef.current = false
     avatarRef.current = { x: startX, y: startY, rotation: 0, targetX: null, targetY: null }
+    robotRef.current = { x: robotStartX, y: robotStartY, rotation: 0, targetId: null, lastRetargetAt: 0 }
     comboCountRef.current = 0
     lastPopAtRef.current = 0
     slowRef.current = { until: 0, multiplier: 1 }
+    modeRef.current = mode
+    levelRef.current = ROBOT_LEVELS[levelIndex]
+    roundSecondsRef.current = roundSeconds
 
     setItems([])
     setParticles([])
     setPings([])
     setAvatar({ x: startX, y: startY, rotation: 0 })
+    setRobotAvatar({ x: robotStartX, y: robotStartY, rotation: 0 })
     setScore(0)
+    setRobotScore(0)
     setMissed(0)
     setCombo(1)
     setSlow({ active: false, until: 0 })
     setImpactId(0)
-    setTimeLeft(ROUND_SECONDS)
+    setTimeLeft(roundSeconds)
     lastSpawnRef.current = 0
     lastFrameRef.current = 0
     roundStartRef.current = performance.now()
-    endAtRef.current = roundStartRef.current + ROUND_SECONDS * 1000
+    endAtRef.current = roundStartRef.current + roundSeconds * 1000
     setStatus('playing')
 
     resumeAudio()
     playStart()
     startMusic()
-  }, [])
+  }, [mode, levelIndex, roundSeconds])
 
   useEffect(() => {
     if (status !== 'playing') return
@@ -476,6 +558,12 @@ export default function App() {
           <span className="hud-icon">⭐</span>
           <span className="hud-value">{score}</span>
         </div>
+        {mode === 'robot' && (
+          <div className="hud-stat hud-stat--robot">
+            <span className="hud-icon">🤖</span>
+            <span className="hud-value">{robotScore}</span>
+          </div>
+        )}
         <div className="hud-stat hud-stat--time">
           <span className="hud-icon">⏱</span>
           <span className="hud-value">{timeLeft}s</span>
@@ -493,7 +581,7 @@ export default function App() {
         </button>
       </header>
       <div className="time-bar-track">
-        <div className="time-bar-fill" style={{ width: `${(timeLeft / ROUND_SECONDS) * 100}%` }} />
+        <div className="time-bar-fill" style={{ width: `${(timeLeft / roundSeconds) * 100}%` }} />
       </div>
 
       <div
@@ -616,6 +704,20 @@ export default function App() {
           </div>
         )}
 
+        {status === 'playing' && mode === 'robot' && (
+          <div
+            className="avatar"
+            style={{ transform: `translate(${robotAvatar.x}px, ${robotAvatar.y}px) rotate(${robotAvatar.rotation}deg)` }}
+          >
+            <div className="avatar-inner robot">
+              <div className="avatar-fletch avatar-fletch-left" />
+              <div className="avatar-fletch avatar-fletch-right" />
+              <div className="avatar-shaft" />
+              <div className="avatar-head" />
+            </div>
+          </div>
+        )}
+
         {status === 'idle' && (
           <div className="overlay">
             <div className="overlay-card">
@@ -623,7 +725,57 @@ export default function App() {
               <h1>Tappers</h1>
               <p>Swipe to steer your arrow — it's slow and heavy, so lead your swipes.</p>
               <p className="hint">Chain pops for combo points. Dodge the spiky balloons — they sting and slow you, and stack if you hit more!</p>
-              <p className="hint">Letting one vanish costs you too. It only gets faster from here.</p>
+
+              <div className="setup-group">
+                <span className="setup-label">Mode</span>
+                <div className="setup-options">
+                  <button
+                    className={`setup-pill${mode === 'solo' ? ' active' : ''}`}
+                    onClick={() => setMode('solo')}
+                  >
+                    Solo
+                  </button>
+                  <button
+                    className={`setup-pill${mode === 'robot' ? ' active' : ''}`}
+                    onClick={() => setMode('robot')}
+                  >
+                    🤖 Vs Robot
+                  </button>
+                </div>
+              </div>
+
+              {mode === 'robot' && (
+                <div className="setup-group">
+                  <span className="setup-label">Difficulty</span>
+                  <div className="setup-options">
+                    {ROBOT_LEVELS.map((level, i) => (
+                      <button
+                        key={level.label}
+                        className={`setup-pill${levelIndex === i ? ' active' : ''}`}
+                        onClick={() => setLevelIndex(i)}
+                      >
+                        {level.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="setup-group">
+                <span className="setup-label">Round length</span>
+                <div className="setup-options">
+                  {ROUND_SECONDS_OPTIONS.map((s) => (
+                    <button
+                      key={s}
+                      className={`setup-pill${roundSeconds === s ? ' active' : ''}`}
+                      onClick={() => setRoundSeconds(s)}
+                    >
+                      {s}s
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <button className="primary" onClick={startGame}>Start</button>
             </div>
           </div>
@@ -632,19 +784,30 @@ export default function App() {
         {status === 'over' && (
           <div className="overlay">
             <div className="overlay-card">
-              <div className="overlay-emoji">💦</div>
-              <h1>Time's up!</h1>
+              <div className="overlay-emoji">{mode === 'robot' ? (score > robotScore ? '🏆' : score < robotScore ? '🤖' : '🤝') : '💦'}</div>
+              <h1>
+                {mode === 'robot'
+                  ? score > robotScore ? 'You win!' : score < robotScore ? 'Robot wins!' : "It's a tie!"
+                  : "Time's up!"}
+              </h1>
               <div className="result-row">
                 <div className="result-stat">
                   <span className="result-value">{score}</span>
-                  <span className="result-label">Score</span>
+                  <span className="result-label">{mode === 'robot' ? 'You' : 'Score'}</span>
                 </div>
+                {mode === 'robot' && (
+                  <div className="result-stat">
+                    <span className="result-value">{robotScore}</span>
+                    <span className="result-label">Robot</span>
+                  </div>
+                )}
                 <div className="result-stat">
                   <span className="result-value">{missed}</span>
                   <span className="result-label">Missed</span>
                 </div>
               </div>
               <button className="primary" onClick={startGame}>Play again</button>
+              <button className="secondary" onClick={() => setStatus('idle')}>Menu</button>
             </div>
           </div>
         )}
