@@ -2,28 +2,40 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 
 const ROUND_SECONDS = 60
-const MIN_LIFESPAN_MS = 1800
-const MAX_LIFESPAN_MS = 3200
 const SPEED = 60 // px per second
 const FLASH_DURATION_MS = 260
 const DROP_GRAVITY = 480 // px/s^2
 
-const AVATAR_HIT_RADIUS = 15
-const AVATAR_CHASE_RATE = 7 // higher = snappier catch-up to the finger; the lag is the challenge
 const PING_DURATION_MS = 400
 
 // difficulty ramps up over the round — this is what makes it hard
 const SPAWN_INTERVAL_START = 650
-const SPAWN_INTERVAL_END = 300
+const SPAWN_INTERVAL_END = 220
 const MAX_ITEMS_START = 8
-const MAX_ITEMS_END = 13
-const SPEED_MULT_END = 2
+const MAX_ITEMS_END = 16
+const SPEED_MULT_END = 2.6
 const BOMB_CHANCE_START = 0.05
-const BOMB_CHANCE_END = 0.32
+const BOMB_CHANCE_END = 0.4
 
-const BOMB_PENALTY = 4
-const STUN_MS = 650
-const COMBO_WINDOW_MS = 900
+// balloons live shorter as the round goes on — less time to react late game
+const MIN_LIFESPAN_START = 1800
+const MIN_LIFESPAN_END = 1100
+const MAX_LIFESPAN_START = 3200
+const MAX_LIFESPAN_END = 2000
+
+// control gets twitchier under pressure: catch-up slows and the touch window shrinks
+const AVATAR_CHASE_RATE_START = 7
+const AVATAR_CHASE_RATE_END = 4.3
+const AVATAR_HIT_RADIUS_START = 15
+const AVATAR_HIT_RADIUS_END = 7
+const TOUCH_SIZE_FACTOR_START = 0.4
+const TOUCH_SIZE_FACTOR_END = 0.22
+
+const BOMB_PENALTY = 6
+const STUN_MS_START = 650
+const STUN_MS_END = 1000
+const MISS_PENALTY = 1
+const COMBO_WINDOW_MS = 750
 const MAX_COMBO_MULT = 5
 
 // size range + score value per balloon tier — pops in a single touch
@@ -117,7 +129,7 @@ function explodeBomb(item, now) {
   return particles
 }
 
-function makeItem(boundsWidth, boundsHeight, speedMult, bombChance) {
+function makeItem(boundsWidth, boundsHeight, speedMult, bombChance, lifespanMin, lifespanMax) {
   const isBomb = Math.random() < bombChance
   const angle = Math.random() * Math.PI * 2
   if (isBomb) {
@@ -134,7 +146,7 @@ function makeItem(boundsWidth, boundsHeight, speedMult, bombChance) {
       rotation: Math.random() * 360,
       spin: randomBetween(-80, 80),
       bornAt: performance.now(),
-      lifespan: randomBetween(MIN_LIFESPAN_MS, MAX_LIFESPAN_MS),
+      lifespan: randomBetween(lifespanMin, lifespanMax),
       points: -BOMB_PENALTY,
     }
   }
@@ -152,7 +164,7 @@ function makeItem(boundsWidth, boundsHeight, speedMult, bombChance) {
     rotation: Math.random() * 360,
     spin: randomBetween(-120, 120),
     bornAt: performance.now(),
-    lifespan: randomBetween(MIN_LIFESPAN_MS, MAX_LIFESPAN_MS),
+    lifespan: randomBetween(lifespanMin, lifespanMax),
     hue: Math.floor(randomBetween(0, 360)),
     tier: tier.tier,
     points: tier.points,
@@ -209,10 +221,19 @@ export default function App() {
     const maxItems = Math.round(lerp(MAX_ITEMS_START, MAX_ITEMS_END, frac))
     const speedMult = lerp(1, SPEED_MULT_END, frac)
     const bombChance = lerp(BOMB_CHANCE_START, BOMB_CHANCE_END, frac)
+    const lifespanMin = lerp(MIN_LIFESPAN_START, MIN_LIFESPAN_END, frac)
+    const lifespanMax = lerp(MAX_LIFESPAN_START, MAX_LIFESPAN_END, frac)
+    const chaseRate = lerp(AVATAR_CHASE_RATE_START, AVATAR_CHASE_RATE_END, frac)
+    const hitRadius = lerp(AVATAR_HIT_RADIUS_START, AVATAR_HIT_RADIUS_END, frac)
+    const touchFactor = lerp(TOUCH_SIZE_FACTOR_START, TOUCH_SIZE_FACTOR_END, frac)
+    const stunMs = lerp(STUN_MS_START, STUN_MS_END, frac)
 
     if (now - lastSpawnRef.current > spawnInterval && itemsRef.current.length < maxItems) {
       lastSpawnRef.current = now
-      itemsRef.current = [...itemsRef.current, makeItem(bounds.width, bounds.height, speedMult, bombChance)]
+      itemsRef.current = [
+        ...itemsRef.current,
+        makeItem(bounds.width, bounds.height, speedMult, bombChance, lifespanMin, lifespanMax),
+      ]
     }
 
     // move + spin balloons
@@ -237,7 +258,7 @@ export default function App() {
       const dist = Math.hypot(dx, dy)
       if (dist > 0.4) {
         av.rotation = (Math.atan2(dx, -dy) * 180) / Math.PI
-        const t = 1 - Math.exp(-AVATAR_CHASE_RATE * dt)
+        const t = 1 - Math.exp(-chaseRate * dt)
         av.x += dx * t
         av.y += dy * t
       } else {
@@ -254,7 +275,7 @@ export default function App() {
     itemsRef.current = itemsRef.current.filter((item) => {
       const icx = item.x + item.size / 2
       const icy = item.y + item.size / 2
-      const touchRadius = AVATAR_HIT_RADIUS + item.size * 0.4
+      const touchRadius = hitRadius + item.size * touchFactor
       if (Math.hypot(avCx - icx, avCy - icy) <= touchRadius) {
         if (item.type === 'bomb') poppedBombs.push(item)
         else poppedBalloons.push(item)
@@ -267,7 +288,7 @@ export default function App() {
       for (const bomb of poppedBombs) {
         particlesRef.current = [...particlesRef.current, ...explodeBomb(bomb, now)]
       }
-      stunnedUntilRef.current = now + STUN_MS
+      stunnedUntilRef.current = now + stunMs
       comboCountRef.current = 0
       setScore((s) => Math.max(0, s - BOMB_PENALTY * poppedBombs.length))
     }
@@ -296,7 +317,10 @@ export default function App() {
       if (!alive && item.type === 'balloon') missedThisFrame += 1
       return alive
     })
-    if (missedThisFrame > 0) setMissed((m) => m + missedThisFrame)
+    if (missedThisFrame > 0) {
+      setMissed((m) => m + missedThisFrame)
+      setScore((s) => Math.max(0, s - MISS_PENALTY * missedThisFrame))
+    }
 
     // move + fade particles (water droplets + smoke fall/float with physics, flashes just fade)
     particlesRef.current = particlesRef.current
@@ -540,7 +564,7 @@ export default function App() {
               <h1>Tappers</h1>
               <p>Swipe to steer your arrow — it trails just behind your finger.</p>
               <p className="hint">Chain pops for combo points. Dodge the spiky bombs — they sting and stun!</p>
-              <p className="hint">It only gets faster from here.</p>
+              <p className="hint">Letting one pop vanish costs you too. It only gets faster — and tighter.</p>
               <button className="primary" onClick={startGame}>Start</button>
             </div>
           </div>
