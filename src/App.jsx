@@ -71,6 +71,41 @@ const DECOR_BALLOONS = [
   { left: '28%', top: '85%', size: 38, hue: 10, duration: 7.8, delay: 0.3 },
 ]
 
+// newest first — shown in the in-app changelog, APP_VERSION is derived from entry 0
+const CHANGELOG = [
+  {
+    version: '1.4',
+    title: 'Home screen & sound',
+    text: 'A real setup menu to pick your mode, plus synthesized sound effects, music, and a screen-flash when a slowdown balloon hits.',
+    diagram: 'sound',
+  },
+  {
+    version: '1.3',
+    title: 'Robot opponent',
+    text: 'Race a robot arrow for balloons across 3 difficulty levels, in a 30s or 60s round.',
+    diagram: 'robot',
+  },
+  {
+    version: '1.2',
+    title: 'Combo & slowdown balloons',
+    text: 'Chain pops quickly for a score multiplier. Spiky balloons halve your speed for 3s, and stack if you hit another while it’s active.',
+    diagram: 'combo',
+  },
+  {
+    version: '1.1',
+    title: 'Difficulty ramp',
+    text: 'Spawn rate, balloon speed, and bomb frequency all climb as the round goes on — the back half is tougher than the opener.',
+    diagram: 'ramp',
+  },
+  {
+    version: '1.0',
+    title: 'Lag-follow arrow',
+    text: 'Swipe to steer a slow, heavy arrow that trails behind your finger. Lead your swipe ahead of a balloon to pop it.',
+    diagram: 'lag',
+  },
+]
+const APP_VERSION = CHANGELOG[0].version
+
 let nextId = 1
 let nextParticleId = 1
 let nextPingId = 1
@@ -196,6 +231,59 @@ function makeItem(boundsWidth, boundsHeight, speedMult, bombChance, lifespanMin,
   }
 }
 
+function ChangelogDiagram({ type }) {
+  if (type === 'lag') {
+    return (
+      <svg viewBox="0 0 120 60" className="changelog-diagram">
+        <line x1="20" y1="42" x2="86" y2="18" stroke="#ffffff55" strokeWidth="2" strokeDasharray="4 4" />
+        <circle cx="20" cy="42" r="7" fill="#ff9fb2" />
+        <circle cx="86" cy="18" r="7" fill="#4fd1c5" />
+        <path d="M94 12 L104 18 L94 24" fill="none" stroke="#4fd1c5" strokeWidth="2" />
+      </svg>
+    )
+  }
+  if (type === 'ramp') {
+    return (
+      <svg viewBox="0 0 120 60" className="changelog-diagram">
+        <rect x="14" y="38" width="16" height="16" rx="2" fill="#4fd1c5" opacity="0.5" />
+        <rect x="40" y="28" width="16" height="26" rx="2" fill="#4fd1c5" opacity="0.7" />
+        <rect x="66" y="16" width="16" height="38" rx="2" fill="#4fd1c5" opacity="0.85" />
+        <rect x="92" y="6" width="16" height="48" rx="2" fill="#ff5277" />
+      </svg>
+    )
+  }
+  if (type === 'combo') {
+    return (
+      <svg viewBox="0 0 120 60" className="changelog-diagram">
+        <circle cx="16" cy="30" r="8" fill="#ff9fb2" />
+        <circle cx="42" cy="22" r="8" fill="#ffb84f" />
+        <circle cx="68" cy="30" r="8" fill="#4fd1c5" />
+        <line x1="24" y1="28" x2="34" y2="24" stroke="#ffffff55" strokeWidth="2" />
+        <line x1="50" y1="24" x2="60" y2="28" stroke="#ffffff55" strokeWidth="2" />
+        <text x="84" y="34" fontSize="16" fontWeight="800" fill="#ffb84f">x3</text>
+        <circle cx="98" cy="14" r="6" fill="#1a1a1a" stroke="#ff5277" strokeWidth="2" />
+      </svg>
+    )
+  }
+  if (type === 'robot') {
+    return (
+      <svg viewBox="0 0 120 60" className="changelog-diagram">
+        <circle cx="60" cy="30" r="9" fill="#ff9fb2" />
+        <path d="M14 48 L50 34" stroke="#c08a4e" strokeWidth="3" strokeLinecap="round" />
+        <path d="M106 12 L70 26" stroke="#3fa7ff" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 120 60" className="changelog-diagram">
+      <rect x="14" y="22" width="10" height="16" rx="2" fill="#4fd1c5" />
+      <path d="M24 22 L38 12 L38 48 L24 38 Z" fill="#4fd1c5" />
+      <path d="M48 20 Q56 30 48 40" fill="none" stroke="#4fd1c5" strokeWidth="2" />
+      <path d="M58 14 Q72 30 58 46" fill="none" stroke="#4fd1c5" strokeWidth="2" opacity="0.6" />
+    </svg>
+  )
+}
+
 export default function App() {
   const [status, setStatus] = useState('idle') // idle | playing | over
   const [items, setItems] = useState([])
@@ -213,6 +301,7 @@ export default function App() {
   const [impactId, setImpactId] = useState(0)
   const [mode, setMode] = useState('solo') // solo | robot
   const [levelIndex, setLevelIndex] = useState(1)
+  const [showChangelog, setShowChangelog] = useState(false)
   const [muted, setMutedState] = useState(() => {
     try {
       return localStorage.getItem('tappers-muted') === '1'
@@ -524,6 +613,12 @@ export default function App() {
     startMusic()
   }, [mode, levelIndex, roundSeconds])
 
+  const goHome = useCallback(() => {
+    stopLoop()
+    stopMusic()
+    setStatus('idle')
+  }, [stopLoop])
+
   useEffect(() => {
     if (status !== 'playing') return
     stopLoop()
@@ -564,27 +659,34 @@ export default function App() {
   return (
     <div className="app">
       <header className="hud">
-        <div className="hud-stat">
-          <span className="hud-icon">⭐</span>
-          <span className="hud-value">{score}</span>
-        </div>
-        {mode === 'robot' && (
-          <div className="hud-stat hud-stat--robot">
-            <span className="hud-icon">🤖</span>
-            <span className="hud-value">{robotScore}</span>
-          </div>
+        {status === 'playing' ? (
+          <button className="home-btn" onClick={goHome} aria-label="Go to home screen">🏠</button>
+        ) : (
+          <span className="home-btn-spacer" />
         )}
-        <div className="hud-stat hud-stat--time">
-          <span className="hud-icon">⏱</span>
-          <span className="hud-value">{timeLeft}s</span>
-        </div>
-        <div className="hud-stat">
-          <span className="hud-icon">💥</span>
-          <span className="hud-value">{missed}</span>
-        </div>
-        <div className={`hud-stat hud-combo${combo > 1 ? ' hot' : ''}`}>
-          <span className="hud-icon">🔥</span>
-          <span className="hud-value">x{combo}</span>
+        <div className="hud-stats">
+          <div className="hud-stat">
+            <span className="hud-icon">⭐</span>
+            <span className="hud-value">{score}</span>
+          </div>
+          {mode === 'robot' && (
+            <div className="hud-stat hud-stat--robot">
+              <span className="hud-icon">🤖</span>
+              <span className="hud-value">{robotScore}</span>
+            </div>
+          )}
+          <div className="hud-stat hud-stat--time">
+            <span className="hud-icon">⏱</span>
+            <span className="hud-value">{timeLeft}s</span>
+          </div>
+          <div className="hud-stat">
+            <span className="hud-icon">💥</span>
+            <span className="hud-value">{missed}</span>
+          </div>
+          <div className={`hud-stat hud-combo${combo > 1 ? ' hot' : ''}`}>
+            <span className="hud-icon">🔥</span>
+            <span className="hud-value">x{combo}</span>
+          </div>
         </div>
         <button className="mute-toggle" onClick={() => setMutedState((m) => !m)} aria-label="Toggle sound">
           {muted ? '🔇' : '🔊'}
@@ -811,6 +913,11 @@ export default function App() {
               <button className="primary start-btn" onClick={startGame}>Start ▸</button>
               <p className="hint">Dodge the spiky balloons — they slow you and stack. Chain pops for combo points.</p>
             </div>
+
+            <button className="changelog-link" onClick={() => setShowChangelog(true)}>
+              📜 What's new
+            </button>
+            <span className="version-tag">v{APP_VERSION}</span>
           </div>
         )}
 
@@ -845,6 +952,31 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {showChangelog && (
+        <div className="changelog-overlay" onClick={() => setShowChangelog(false)}>
+          <div className="changelog-card" onClick={(e) => e.stopPropagation()}>
+            <div className="changelog-header">
+              <h2>What's new</h2>
+              <button className="changelog-close" onClick={() => setShowChangelog(false)} aria-label="Close">✕</button>
+            </div>
+            <div className="changelog-list">
+              {CHANGELOG.map((entry) => (
+                <div className="changelog-entry" key={entry.version}>
+                  <ChangelogDiagram type={entry.diagram} />
+                  <div className="changelog-entry-body">
+                    <div className="changelog-entry-head">
+                      <span className="changelog-version">v{entry.version}</span>
+                      <span className="changelog-title">{entry.title}</span>
+                    </div>
+                    <p className="changelog-text">{entry.text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
