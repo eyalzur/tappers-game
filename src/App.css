@@ -462,29 +462,194 @@
   letter-spacing: 0.06em;
 }
 
-.setup-options {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
+.home-overlay {
+  overflow: hidden;
 }
 
-.setup-pill {
-  padding: 7px 14px;
+.decor-balloon {
+  position: absolute;
+  margin: 0;
+  border-radius: 50% 50% 50% 50% / 58% 58% 42% 42%;
+  background: radial-gradient(
+    circle at 32% 26%,
+    hsl(var(--hue) 100% 88%) 0%,
+    hsl(var(--hue) 92% 62%) 45%,
+    hsl(var(--hue) 88% 38%) 100%
+  );
+  opacity: 0.4;
+  filter: blur(0.5px);
+  pointer-events: none;
+  animation-name: decor-float;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes decor-float {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-16px) rotate(6deg); }
+}
+
+.home-card {
+  max-width: 380px;
+  position: relative;
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.tagline {
+  color: rgba(255, 255, 255, 0.55);
   font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+}
+
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 14px 8px;
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.mode-card:active {
+  transform: scale(0.97);
+}
+
+.mode-card.active {
+  border-color: #4fd1c5;
+  background: linear-gradient(160deg, rgba(79, 209, 197, 0.18), rgba(63, 167, 255, 0.1));
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(79, 209, 197, 0.4), 0 8px 20px rgba(79, 209, 197, 0.15);
+}
+
+.mode-icon {
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.mode-title {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.mode-desc {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.mode-card.active .mode-desc {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.level-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+.level-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 4px;
+  font-size: 0.78rem;
   font-weight: 700;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.level-card:active {
+  transform: scale(0.96);
+}
+
+.level-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.level-easy .level-dot { background: #4fd1c5; }
+.level-medium .level-dot { background: #ffb84f; }
+.level-hard .level-dot { background: #ff5277; }
+
+.level-card.active {
+  color: #fff;
+}
+
+.level-easy.active {
+  border-color: #4fd1c5;
+  background: rgba(79, 209, 197, 0.16);
+  box-shadow: 0 0 0 1px rgba(79, 209, 197, 0.35);
+}
+
+.level-medium.active {
+  border-color: #ffb84f;
+  background: rgba(255, 184, 79, 0.16);
+  box-shadow: 0 0 0 1px rgba(255, 184, 79, 0.35);
+}
+
+.level-hard.active {
+  border-color: #ff5277;
+  background: rgba(255, 82, 119, 0.16);
+  box-shadow: 0 0 0 1px rgba(255, 82, 119, 0.35);
+}
+
+.duration-toggle {
+  display: inline-flex;
+  padding: 3px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.75);
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.setup-pill.active {
+.duration-option {
+  padding: 7px 22px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.duration-option.active {
   background: linear-gradient(135deg, #4fd1c5, #3fa7ff);
-  border-color: transparent;
   color: #0b0c1b;
+}
+
+.start-btn {
+  animation: cta-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes cta-pulse {
+  0%, 100% { box-shadow: 0 10px 24px rgba(255, 82, 119, 0.4); }
+  50% { box-shadow: 0 10px 32px rgba(255, 82, 119, 0.7); }
 }
 
 .secondary {

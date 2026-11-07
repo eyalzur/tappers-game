@@ -61,6 +61,16 @@ const TIERS = [
 ]
 const TIER_WEIGHTS = [0.55, 0.3, 0.15]
 
+// purely decorative balloons drifting behind the home screen — fixed, not gameplay items
+const DECOR_BALLOONS = [
+  { left: '10%', top: '12%', size: 52, hue: 200, duration: 7.5, delay: 0 },
+  { left: '82%', top: '8%', size: 40, hue: 330, duration: 6.2, delay: 0.6 },
+  { left: '88%', top: '62%', size: 60, hue: 40, duration: 8.4, delay: 1.1 },
+  { left: '6%', top: '72%', size: 46, hue: 150, duration: 7, delay: 1.8 },
+  { left: '50%', top: '4%', size: 34, hue: 280, duration: 6.8, delay: 0.9 },
+  { left: '28%', top: '85%', size: 38, hue: 10, duration: 7.8, delay: 0.3 },
+]
+
 let nextId = 1
 let nextParticleId = 1
 let nextPingId = 1
@@ -719,27 +729,48 @@ export default function App() {
         )}
 
         {status === 'idle' && (
-          <div className="overlay">
-            <div className="overlay-card">
-              <div className="overlay-emoji">🎈</div>
-              <h1>Tappers</h1>
-              <p>Swipe to steer your arrow — it's slow and heavy, so lead your swipes.</p>
-              <p className="hint">Chain pops for combo points. Dodge the spiky balloons — they sting and slow you, and stack if you hit more!</p>
+          <div className="overlay home-overlay">
+            {DECOR_BALLOONS.map((b, i) => (
+              <div
+                key={i}
+                className="decor-balloon"
+                style={{
+                  left: b.left,
+                  top: b.top,
+                  width: b.size,
+                  height: b.size,
+                  animationDuration: `${b.duration}s`,
+                  animationDelay: `${b.delay}s`,
+                  '--hue': b.hue,
+                }}
+              />
+            ))}
+
+            <div className="overlay-card home-card">
+              <div className="brand">
+                <div className="overlay-emoji">🎈</div>
+                <h1>Tappers</h1>
+                <p className="tagline">Lead your swipe. Pop the balloons.</p>
+              </div>
 
               <div className="setup-group">
                 <span className="setup-label">Mode</span>
-                <div className="setup-options">
+                <div className="mode-grid">
                   <button
-                    className={`setup-pill${mode === 'solo' ? ' active' : ''}`}
+                    className={`mode-card${mode === 'solo' ? ' active' : ''}`}
                     onClick={() => setMode('solo')}
                   >
-                    Solo
+                    <span className="mode-icon">🏹</span>
+                    <span className="mode-title">Solo</span>
+                    <span className="mode-desc">Beat the clock</span>
                   </button>
                   <button
-                    className={`setup-pill${mode === 'robot' ? ' active' : ''}`}
+                    className={`mode-card${mode === 'robot' ? ' active' : ''}`}
                     onClick={() => setMode('robot')}
                   >
-                    🤖 Vs Robot
+                    <span className="mode-icon">🤖</span>
+                    <span className="mode-title">Vs Robot</span>
+                    <span className="mode-desc">Race for balloons</span>
                   </button>
                 </div>
               </div>
@@ -747,13 +778,14 @@ export default function App() {
               {mode === 'robot' && (
                 <div className="setup-group">
                   <span className="setup-label">Difficulty</span>
-                  <div className="setup-options">
+                  <div className="level-grid">
                     {ROBOT_LEVELS.map((level, i) => (
                       <button
                         key={level.label}
-                        className={`setup-pill${levelIndex === i ? ' active' : ''}`}
+                        className={`level-card level-${level.label.toLowerCase()}${levelIndex === i ? ' active' : ''}`}
                         onClick={() => setLevelIndex(i)}
                       >
+                        <span className="level-dot" />
                         {level.label}
                       </button>
                     ))}
@@ -763,11 +795,11 @@ export default function App() {
 
               <div className="setup-group">
                 <span className="setup-label">Round length</span>
-                <div className="setup-options">
+                <div className="duration-toggle">
                   {ROUND_SECONDS_OPTIONS.map((s) => (
                     <button
                       key={s}
-                      className={`setup-pill${roundSeconds === s ? ' active' : ''}`}
+                      className={`duration-option${roundSeconds === s ? ' active' : ''}`}
                       onClick={() => setRoundSeconds(s)}
                     >
                       {s}s
@@ -776,7 +808,8 @@ export default function App() {
                 </div>
               </div>
 
-              <button className="primary" onClick={startGame}>Start</button>
+              <button className="primary start-btn" onClick={startGame}>Start ▸</button>
+              <p className="hint">Dodge the spiky balloons — they slow you and stack. Chain pops for combo points.</p>
             </div>
           </div>
         )}
