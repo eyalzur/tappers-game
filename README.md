@@ -1,6 +1,6 @@
 # Tappers
 
-Tap where you want to go — your arrow avatar takes time to travel there, which is the challenge. Touch a balloon with the arrow to pop it; small ones pop on contact, bigger ones need the arrow to linger. Popping splashes colored water matching the balloon's color.
+Swipe to steer a thin wooden arrow that trails just behind your finger — the lag is the challenge. One touch pops any balloon it crosses, so a good swipe can chain several at once. Popping splashes colored water matching the balloon's color.
 
 Phase 1: single player. Planned: play against a robot, then real two-player.
 
